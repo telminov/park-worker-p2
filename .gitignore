@@ -1,0 +1,7 @@
+.idea
+MANIFEST
+build/
+dist/
+parkworker2/settings.py
+virt_env/
+django_park_worker_p2.egg-info
