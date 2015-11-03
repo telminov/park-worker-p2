@@ -10,6 +10,6 @@ setup(
     packages=['parkworker2',],
     license='The MIT License',
     install_requires=[
-        'park-worker-base', 'pyzmq', 'pytz',
+        'park-worker-base', 'pyzmq', 'pytz', 'ansible=1.9', 'sw-python-utils'
     ],
 )

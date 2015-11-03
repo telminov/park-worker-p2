@@ -1,25 +1,69 @@
 # coding: utf-8
-import subprocess
+import os
+import tempfile
+
+import ansible.runner
+import ansible.inventory
 
 from parkworker.monits.base import Monit, CheckResult
+from parkworker2 import settings
+from swutils.encrypt import decrypt
 
 
-class PingMonit(Monit):
+class AnsibleMonitMixin(object):
+    @staticmethod
+    def _create_inventory(host):
+        fd, host_list_path = tempfile.mkstemp()
+        host_list_file = os.fdopen(fd, 'w')
+        host_list_file.write(host)
+        host_list_file.close()
+
+        inventory = ansible.inventory.Inventory(host_list_path)
+        return inventory
+
+    @staticmethod
+    def _get_user_pass(kwargs):
+        remote_user = kwargs['credentials']['ssh']['username']
+        remote_encrypted_pass = kwargs['credentials']['ssh']['encrypted_password']
+        remote_pass = decrypt(remote_encrypted_pass, settings.SECRET_KEY.encode('utf-8'))
+        return remote_user, remote_pass
+
+    @classmethod
+    def _correct_result(cls, result):
+        corrected_result = {}
+        for k, v in result.iteritems():
+            if isinstance(v, dict):
+                v = cls._correct_result(v)
+            # mongo reserved symbols "." and "$"
+            k = k.replace('.', '-')
+            k = k.replace('$', 'S')
+            corrected_result[k] = v
+        return corrected_result
+
+
+class PingMonit(AnsibleMonitMixin, Monit):
     name = 'ansible.ping'
-    description = 'Ping host checking.'
+    description = 'Ansible ping host checking.'
 
     def check(self, host, **kwargs):
-        # TODO: via ansible
-        return_code = subprocess.call(
-            ['ping', host, '-c1'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
+        remote_user, remote_pass = self._get_user_pass(kwargs)
+        inventory = self._create_inventory(host)
 
-        is_success = return_code == 0
+        runner = ansible.runner.Runner(
+            module_name='ping',
+            module_args='',
+            inventory=inventory,
+            pattern=host,
+            remote_user=remote_user, remote_pass=remote_pass
+        )
+        result = runner.run()
+
+        is_success = not (result['dark'].get(host) and result['dark'][host].get('failed'))
 
         check_result = CheckResult(
             is_success=is_success,
-            extra={},
+            extra=self._correct_result(result),
         )
         return check_result
+
+
