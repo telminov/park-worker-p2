@@ -5,10 +5,11 @@ from parkworker.monits.base import Monit, CheckResult
 
 
 class PingMonit(Monit):
-    name = 'general.ping'
+    name = 'ansible.ping'
     description = 'Ping host checking.'
 
     def check(self, host, **kwargs):
+        # TODO: via ansible
         return_code = subprocess.call(
             ['ping', host, '-c1'],
             stdout=subprocess.PIPE,
