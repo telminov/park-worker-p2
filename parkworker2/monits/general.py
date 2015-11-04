@@ -6,6 +6,7 @@ import ansible.runner
 import ansible.inventory
 
 from parkworker.monits.base import Monit, CheckResult
+from parkworker import const
 from parkworker2 import settings
 from swutils.encrypt import decrypt
 
@@ -58,10 +59,13 @@ class PingMonit(AnsibleMonitMixin, Monit):
         )
         result = runner.run()
 
-        is_success = not (result['dark'].get(host) and result['dark'][host].get('failed'))
+        if result['dark'].get(host) and result['dark'][host].get('failed'):
+            level = const.LEVEL_FAIL
+        else:
+            level = const.LEVEL_OK
 
         check_result = CheckResult(
-            is_success=is_success,
+            level=level,
             extra=self._correct_result(result),
         )
         return check_result

@@ -13,4 +13,4 @@ args = parser.parse_args()
 monit = Monit.get_monit(args.monit_name)()
 for host in args.hosts:
     result = monit.check(host)
-    print(monit.name, host, ':', result.is_success)
+    print(monit.name, host, ':', result.level)
