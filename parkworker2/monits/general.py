@@ -93,6 +93,95 @@ class PingMonit(AnsibleMonitMixin, Monit):
         return result
 
 
+class HostFactsMonit(AnsibleMonitMixin, Monit):
+    name = 'ansible.host_facts'
+    description = 'Get host facts. Monit may be useful for inheritance.'
+
+    def run(self, host, remote_user, remote_pass, inventory, kwargs):
+        runner = ansible.runner.Runner(
+            module_name='setup',
+            module_args='',
+            inventory=inventory,
+            pattern=host,
+            remote_user=remote_user, remote_pass=remote_pass
+        )
+        result = runner.run()
+        return result
+
+    def process_contacted(self, result, kwargs):
+        contacted = self._get_contacted(result)
+        extra = self.get_host_data(contacted)
+        return CheckResult(
+            level=const.LEVEL_OK,
+            extra=extra,
+        )
+
+    @staticmethod
+    def get_host_data(contacted):
+        devices = {}
+        for name, data in contacted['ansible_facts']['ansible_devices'].items():
+            partitions = []
+            for partition_name, partition_data in data['partitions'].items():
+                partitions.append({
+                    'name': partition_name,
+                    'size': partition_data['size'],
+                })
+
+            devices[name] = {
+                'model': data['model'],
+                'size': data['size'],
+                'vendor': data['vendor'],
+                'removable': data['removable'],
+                'partitions': partitions,
+            }
+
+        docker = None
+        if 'ansible_docker0' in contacted['ansible_facts']:
+            docker = {
+                'active': contacted['ansible_facts']['ansible_docker0']['active'],
+                'ipv4': contacted['ansible_facts']['ansible_docker0']['ipv4'],
+            }
+
+        return {
+            'name': contacted['ansible_facts']['ansible_product_name'],
+            'hostname': contacted['ansible_facts']['ansible_hostname'],
+            'os': {
+                'family': contacted['ansible_facts']['ansible_os_family'],
+                'kernel': contacted['ansible_facts']['ansible_kernel'],
+                'distribution': {
+                    'name': contacted['ansible_facts']['ansible_distribution'],
+                    'version': contacted['ansible_facts']['ansible_distribution_version'],
+                    'release': contacted['ansible_facts']['ansible_distribution_release'],
+                },
+                'architecture': contacted['ansible_facts']['ansible_architecture'],
+            },
+            'processors': contacted['ansible_facts']['ansible_processor'],
+            'memory': {
+                'free': contacted['ansible_facts']['ansible_memfree_mb'],
+                'total': contacted['ansible_facts']['ansible_memtotal_mb'],
+            },
+            'swap': {
+                'free': contacted['ansible_facts']['ansible_swapfree_mb'],
+                'total': contacted['ansible_facts']['ansible_swaptotal_mb'],
+            },
+            'network': {
+                'ipv4': {
+                    'default': contacted['ansible_facts']['ansible_default_ipv4'],
+                    'all': contacted['ansible_facts']['ansible_all_ipv4_addresses'],
+                },
+                'ipv6': {
+                    'default': contacted['ansible_facts']['ansible_default_ipv6'],
+                    'all': contacted['ansible_facts']['ansible_all_ipv6_addresses'],
+                }
+            },
+            'devices': devices,
+            'interfaces': contacted['ansible_facts']['ansible_interfaces'],
+            'docker': docker,
+            'env': contacted['ansible_facts']['ansible_env'],
+            'date_time': contacted['ansible_facts']['ansible_date_time'],
+        }
+
+
 class DiskSpaceMonit(AnsibleMonitMixin, Monit):
 
     name = 'ansible.disk_space'
