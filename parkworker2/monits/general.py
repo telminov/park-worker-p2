@@ -1,5 +1,4 @@
 # coding: utf-8
-import re
 import os
 import tempfile
 
@@ -109,11 +108,14 @@ class HostFactsMonit(AnsibleMonitMixin, Monit):
         return result
 
     def process_contacted(self, result, kwargs):
+        """
+        method for override process data logic
+        """
         contacted = self._get_contacted(result)
-        extra = self.get_host_data(contacted)
+        host_data = self.get_host_data(contacted)
         return CheckResult(
             level=const.LEVEL_OK,
-            extra=extra,
+            extra=host_data,
         )
 
     @staticmethod
@@ -161,8 +163,8 @@ class HostFactsMonit(AnsibleMonitMixin, Monit):
                 'total': contacted['ansible_facts']['ansible_memtotal_mb'],
             },
             'swap': {
-                'free': contacted['ansible_facts']['ansible_swapfree_mb'],
-                'total': contacted['ansible_facts']['ansible_swaptotal_mb'],
+                'free': int(contacted['ansible_facts'].get('ansible_swapfree_mb', 0)),
+                'total': int(contacted['ansible_facts'].get('ansible_swaptotal_mb', 0)),
             },
             'network': {
                 'ipv4': {
@@ -175,6 +177,7 @@ class HostFactsMonit(AnsibleMonitMixin, Monit):
                 }
             },
             'devices': devices,
+            'mounts': contacted['ansible_facts']['ansible_mounts'],
             'interfaces': contacted['ansible_facts']['ansible_interfaces'],
             'docker': docker,
             'env': contacted['ansible_facts']['ansible_env'],
@@ -182,99 +185,104 @@ class HostFactsMonit(AnsibleMonitMixin, Monit):
         }
 
 
-class DiskSpaceMonit(AnsibleMonitMixin, Monit):
+class SwapMonit(HostFactsMonit):
+
+    name = 'ansible.swap'
+    description = 'Ansible swap host checking. Options: \n' \
+                  ' - warning. Optional. Percents. Default 50. \n' \
+                  ' - fail. Optional. Percents. Default 90.'
+
+    def process_contacted(self, result, kwargs):
+        warning_percent = int(kwargs.get('warning', 50))
+        fail_percent = int(kwargs.get('fail', 90))
+
+        contacted = self._get_contacted(result)
+        host_data = self.get_host_data(contacted)
+
+        total = host_data['swap']['total']
+        free = host_data['swap']['free']
+
+        extra = {
+            'total': total,
+            'free': free,
+        }
+
+        level = const.LEVEL_OK
+        if total:
+            free_percent = int((float(free) / float(total)) * 100)
+            used_percent = 100 - free_percent
+            extra['used_percent'] = used_percent
+
+            if used_percent >= fail_percent:
+                level = const.LEVEL_FAIL
+            elif used_percent >= warning_percent:
+                level = const.LEVEL_WARNING
+
+        return CheckResult(
+            level=level,
+            extra=extra,
+        )
+
+
+class DiskSpaceMonit(HostFactsMonit):
 
     name = 'ansible.disk_space'
     description = 'Ansible disk space host checking. Options: \n' \
                   ' - partitions. Optional. Array with partition names for checking. ' \
                   'For example: ["/", "/var", "/tmp"] \n' \
-                  ' - warning_percent. Optional. Default 80. \n' \
-                  ' - fail_percent. Optional. Default 95.'
-
-    def run(self, host, remote_user, remote_pass, inventory, kwargs):
-        command = 'df -h'
-        runner = ansible.runner.Runner(
-            module_name='shell',
-            module_args=command,
-            inventory=inventory,
-            pattern=host,
-            remote_user=remote_user, remote_pass=remote_pass
-        )
-        result = runner.run()
-        return result
+                  ' - warning. Optional. Percents. Default 80. \n' \
+                  ' - fail. Optional. Percents. Default 95.'
 
     def process_contacted(self, result, kwargs):
         partitions = kwargs.get('partitions')
-        warning_percent = int(kwargs.get('warning_percent', 80))
-        fail_percent = int(kwargs.get('fail_percent', 95))
+        warning_percent = int(kwargs.get('warning', 80))
+        fail_percent = int(kwargs.get('fail', 95))
 
         contacted = self._get_contacted(result)
-        stdout = contacted['stdout']
-        try:
-            space_data = self._parse_space(stdout)
-            extra = self._analyze_spaces(space_data, partitions, warning_percent, fail_percent)
+        host_data = self.get_host_data(contacted)
 
-            if extra.get('fails'):
-                level = const.LEVEL_FAIL
-            elif extra.get('warnings'):
-                level = const.LEVEL_WARNING
-            else:
-                level = const.LEVEL_OK
+        extra = self._analyze_spaces(host_data['mounts'], partitions, warning_percent, fail_percent)
 
-            return CheckResult(
-                level=level,
-                extra=extra,
-            )
+        if extra.get('fails'):
+            level = const.LEVEL_FAIL
+        elif extra.get('warnings'):
+            level = const.LEVEL_WARNING
+        else:
+            level = const.LEVEL_OK
 
-        except ParseStdoutException as ex:
-            return CheckResult(
-                level=const.LEVEL_FAIL,
-                extra={
-                    'stdout': stdout,
-                    'error': 'Parsing stdout error',
-                    'description': str(ex),
-                }
-            )
+        return CheckResult(
+            level=level,
+            extra=extra,
+        )
 
     @staticmethod
-    def _parse_space(stdout):
-        space_data = []
-        pattern = r'^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$'
-
-        for line in stdout.split('\n')[1:]:
-            mo = re.match(pattern, line)
-            if not mo:
-                raise ParseStdoutException('Parsing line "%s" error with pattern "%s"' % (line, pattern))
-
-            groups = mo.groups()
-            space_data.append({
-                'disk': groups[0],
-                'size': groups[1],
-                'used': groups[2],
-                'used_percent': int(groups[4][:-1]),
-                'available': groups[3],
-                'partition': groups[5],
-            })
-
-        return space_data
-
-    @staticmethod
-    def _analyze_spaces(space_data, partitions, warning_percent, fail_percent):
+    def _analyze_spaces(mounts_data, partitions, warning_percent, fail_percent):
         extra = {'spaces': []}
 
-        for item in space_data:
-            if partitions and item['partition'] not in partitions:
+        for item in mounts_data:
+            if partitions and item['mount'] not in partitions:
                 continue
 
-            used_percent = item['used_percent']
-            if warning_percent <= used_percent:
-                partition_data = {'partition': item['partition'], 'used_percent': used_percent}
-                if warning_percent <= used_percent < fail_percent:
-                    extra.setdefault('warnings', []).append(partition_data)
-                elif fail_percent < used_percent:
-                    extra.setdefault('fails', []).append(partition_data)
+            free = item['size_available']
+            total = item['size_total']
+            free_percent = int((float(free) / float(total)) * 100)
+            used_percent = 100 - free_percent
 
-            extra['spaces'].append(item)
+            partition_data = {
+                'partition': item['mount'],
+                'used_percent': used_percent,
+                'free_gb': int(free/1000000000),
+                'total_gb': int(total/1000000000),
+            }
+
+            if used_percent >= warning_percent:
+                used_info = {'partition': item['mount'], 'used_percent': used_percent}
+                if used_percent >= fail_percent:
+                    extra.setdefault('fails', []).append(used_info)
+                elif used_percent >= warning_percent:
+                    extra.setdefault('warnings', []).append(used_info)
+
+            extra['spaces'].append(partition_data)
 
         return extra
 
