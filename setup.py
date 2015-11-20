@@ -4,7 +4,7 @@ from distutils.core import setup
 
 setup(
     name='park-worker-p2',
-    version='0.0.1',
+    version='0.1.0',
     description='Workers for park-keeper project for python version 2.',
     author='Telminov Sergey',
     url='https://github.com/telminov/park-worker-p2',

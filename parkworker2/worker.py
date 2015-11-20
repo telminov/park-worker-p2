@@ -1,10 +1,10 @@
 # coding: utf-8
-from parkworker.monit_worker import BaseMonitWorker
+from parkworker.worker import BaseWorker
 from . import settings
 from .event import emit_event
 
 
-class MonitWorker(BaseMonitWorker):
+class Worker(BaseWorker):
     ZMQ_SERVER_ADDRESS = settings.ZMQ_SERVER_ADDRESS
     ZMQ_WORKER_REGISTRATOR_PORT = settings.ZMQ_WORKER_REGISTRATOR_PORT
 

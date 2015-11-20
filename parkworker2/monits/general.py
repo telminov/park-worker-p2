@@ -5,7 +5,8 @@ import tempfile
 import ansible.runner
 import ansible.inventory
 
-from parkworker.monits.base import Monit, CheckResult
+from parkworker.task_processor import TaskResult
+from parkworker.monit import Monit
 from parkworker import const
 from parkworker2 import settings
 from swutils.encrypt import decrypt
@@ -27,7 +28,7 @@ class AnsibleMonitMixin(object):
         result = self.run(host, remote_user, remote_pass, inventory, kwargs)
 
         if result['dark'].get(host) and result['dark'][host].get('failed'):
-            return CheckResult(
+            return TaskResult(
                 level=const.LEVEL_FAIL,
                 extra=self._correct_result(result),
             )
@@ -36,7 +37,7 @@ class AnsibleMonitMixin(object):
 
     def process_contacted(self, result, kwargs):
         level = const.LEVEL_OK
-        check_result = CheckResult(
+        check_result = TaskResult(
             level=level,
             extra=self._correct_result(result),
         )
@@ -113,7 +114,7 @@ class HostFactsMonit(AnsibleMonitMixin, Monit):
         """
         contacted = self._get_contacted(result)
         host_data = self.get_host_data(contacted)
-        return CheckResult(
+        return TaskResult(
             level=const.LEVEL_OK,
             extra=host_data,
         )
@@ -218,7 +219,7 @@ class SwapMonit(HostFactsMonit):
             elif used_percent >= warning_percent:
                 level = const.LEVEL_WARNING
 
-        return CheckResult(
+        return TaskResult(
             level=level,
             extra=extra,
         )
@@ -250,7 +251,7 @@ class DiskSpaceMonit(HostFactsMonit):
         else:
             level = const.LEVEL_OK
 
-        return CheckResult(
+        return TaskResult(
             level=level,
             extra=extra,
         )
